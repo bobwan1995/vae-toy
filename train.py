@@ -123,8 +123,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     trainer = Trainer(args)
-    trainer.sample(0)
-    trainer.test(0)
     for epoch in range(trainer.epochs):
         trainer.train(epoch)
         trainer.sample(epoch)

@@ -59,11 +59,10 @@ class Trainer:
     def loss_function(self, recon_x, x, mu, log_var):
         recon_loss = F.binary_cross_entropy(recon_x, x.view(-1, 3*self.image_size**2), reduction='sum')
         kl_div = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
-        return recon_loss, kl_div
+        return recon_loss / self.train_batch_size, kl_div / self.train_batch_size
 
     def train(self, epoch):
         self.model.train()
-        train_loss = 0
         for batch_idx, (data, _) in tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="Training"):
             data = data.to(self.device)
             self.optimizer.zero_grad()
@@ -71,14 +70,13 @@ class Trainer:
             recon_loss, kl_div = self.loss_function(recon_batch, data, mu, log_var)
             loss = recon_loss + kl_div
             loss.backward()
-            train_loss += loss.item()
             self.optimizer.step()
 
-            if batch_idx % 1000 == 0:
-                print(f'Train Epoch: [{batch_idx}/{len(self.train_loader)}] Loss: {loss.item() / len(data)}')
-                self.writer.add_scalar('Loss/train', loss.item() / len(data),
-                                       epoch * len(self.train_loader) + batch_idx)
-        # torch.save(self.model, f'{self.directory}/vae_model_{epoch}.pth')
+            if batch_idx % 100 == 0:
+                print(f'Train Epoch: [{batch_idx}/{len(self.train_loader)}] Loss: {loss.item()}, rec: {recon_loss.item()}, kl: {kl_div.item()}')
+                self.writer.add_scalar('Loss_train/total', loss.item(), epoch * len(self.train_loader) + batch_idx)
+                self.writer.add_scalar('Loss_train/rec', recon_loss.item(), epoch * len(self.train_loader) + batch_idx)
+                self.writer.add_scalar('Loss_train/kl', kl_div.item(), epoch * len(self.train_loader) + batch_idx)
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
@@ -88,6 +86,8 @@ class Trainer:
     def test(self, epoch):
         self.model.eval()
         test_loss = 0
+        test_rec = 0
+        test_kl = 0
         with torch.no_grad():
             for i, (data, _) in tqdm(enumerate(self.test_loader), total=len(self.test_loader), desc="Testing"):
                 data = data.to(self.device)
@@ -95,11 +95,15 @@ class Trainer:
                 recon_loss, kl_div = self.loss_function(recon_batch, data, mu, log_var)
                 loss = recon_loss + kl_div
                 test_loss += loss.item()
-                self.writer.add_scalar('Loss/test', loss, epoch * len(self.test_loader) + i)
+                test_rec += recon_loss.item()
+                test_kl += kl_div.item()
 
                 if i == 0:
                     save_image(recon_batch.view(self.test_batch_size, 3, self.image_size, self.image_size),
                                os.path.join(self.directory, f'recon_{epoch}.png'))
+        self.writer.add_scalar('Loss_test/total', test_loss / len(self.test_loader), epoch)
+        self.writer.add_scalar('Loss_test/rec', test_rec / len(self.test_loader), epoch)
+        self.writer.add_scalar('Loss_test/kl', test_kl / len(self.test_loader), epoch)
 
     def sample(self, epoch):
         with torch.no_grad():
@@ -113,7 +117,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train a VAE on CelebA dataset')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train')
     parser.add_argument('--train_batch_size', type=int, default=1, help='input batch size for training')
-    parser.add_argument('--test_batch_size', type=int, default=1, help='input batch size for training')
+    parser.add_argument('--test_batch_size', type=int, default=2, help='input batch size for training')
     parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     parser.add_argument('--data_path', type=str, default='./data', help='path to the dataset')
     parser.add_argument('--exp_name', type=str, default='exp', help='exp name')
